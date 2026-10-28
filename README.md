@@ -157,7 +157,7 @@ data:
 
 ## How it works
 
-- Each inbox item's description ends with `[dedup:<key>] [ts:<unix time>] [to:<slots>]`. The script uses this to find, update and rate-limit items, and to update the right phones. Don't remove it.
+- Each inbox item's description ends with `[dedup:<key>] [ts:<YYYYMMDD HHMMSS>] [to:<slots>]`. The script uses this to find, update and rate-limit items, and to update the right phones. Don't remove it.
 - 🔴 🟠 🟡 🟢 🟣 are consecutive Unicode characters, so alphabetical order is also priority order.
 - Android gets one notification channel per priority (`Notification Center P1 Critical` … `P5 Info`), so each can have its own sound or Do Not Disturb behaviour.
 

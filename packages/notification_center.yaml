@@ -320,6 +320,8 @@ script:
           key: "{{ dedup_key | default('', true) | string | trim }}"
           cooldown: "{{ cooldown_minutes | default(0) | int(0) }}"
           now_ts: "{{ now().timestamp() | int }}"
+          # Readable local time for the [ts:] marker, e.g. 20261028 083924
+          now_stamp: "{{ now().strftime('%Y%m%d %H%M%S') }}"
           item_key: >-
             {{ key if key else 'nc_' ~ now().timestamp() | int ~ '_' ~ range(1000, 9999) | random }}
           task_desc: >-
@@ -379,7 +381,7 @@ script:
           # Machine-readable tail: dedup key, timestamp, who was pushed (for
           # Acknowledge / Done updates). Do not remove from items.
           new_description: >-
-            {{ [task_desc, '[dedup:' ~ item_key ~ '] [ts:' ~ now_ts ~ '] [to:' ~ pushed_nums ~ ']']
+            {{ [task_desc, '[dedup:' ~ item_key ~ '] [ts:' ~ now_stamp ~ '] [to:' ~ pushed_nums ~ ']']
                | select | join('\n\n') }}
           due_fields: >-
             {%- if due_dt -%}{{ {'due_datetime': due_dt} }}
@@ -419,9 +421,15 @@ script:
           existing: "{{ matches[0] if matches | count > 0 else none }}"
           existing_id: >-
             {{ (existing.uid | default(existing.summary, true)) if existing else '' }}
+          # [ts:20261028 083924] (local time) or older [ts:1793173164] (unix)
           existing_ts: >-
-            {%- set t = existing.description | regex_findall('\\[ts:(\\d+)\\]') if existing else [] -%}
-            {{ t | last | int(0) if t else 0 }}
+            {%- set t = existing.description | regex_findall('\\[ts:([0-9 ]+)\\]') if existing else [] -%}
+            {%- set v = (t | last | trim) if t else '' -%}
+            {%- if v | length == 15 and ' ' in v -%}
+              {{ as_timestamp(strptime(v, '%Y%m%d %H%M%S') | as_local, 0) | int(0) }}
+            {%- else -%}
+              {{ v | int(0) }}
+            {%- endif -%}
           in_cooldown: >-
             {{ existing_ts > 0 and cooldown > 0 and (now_ts - existing_ts) < cooldown * 60 }}
           result: >-
