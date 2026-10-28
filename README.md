@@ -17,11 +17,11 @@ A small **inbox for your smart home**. Every automation sends its alerts to one 
   <table>
     <tr>
       <td align="center">
-        <img width="431" height="437" alt="Screenshot of the Notification Center page" src="https://github.com/user-attachments/assets/15d832ff-c4c8-45d8-83ba-8d0b8416c81f" />
+        <img width="434" height="512" alt="Screenshot of the Notification Center inbox" src="docs/screenshots/inbox.png" />
       </td>
     </tr>
     <tr>
-      <td align="center"><sub><b>Screenshot 1:</b> The Notification Center page</sub></td>
+      <td align="center"><sub><b>Screenshot 1:</b> The Notification Center inbox</sub></td>
     </tr>
   </table>
 </div>
