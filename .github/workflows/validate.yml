@@ -1,0 +1,51 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  yamllint:
+    name: YAML lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install yamllint
+      - run: yamllint -c .yamllint .
+
+  check-config:
+    name: Home Assistant ${{ matrix.ha }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ha: "2025.9.4"     # minimum supported version
+            python: "3.13"
+            extra: "pycares<5"
+          - ha: "2026.10.4"    # tested current version
+            python: "3.14"
+            extra: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Home Assistant ${{ matrix.ha }}
+        env:
+          HA_VERSION: ${{ matrix.ha }}
+          EXTRA: ${{ matrix.extra }}
+        run: pip install "homeassistant==${HA_VERSION}" ${EXTRA:+"$EXTRA"}
+      - name: Build a test configuration
+        run: |
+          mkdir -p cfg/packages
+          cp packages/notification_center.yaml cfg/packages/
+          printf 'homeassistant:\n  packages: !include_dir_named packages\n' > cfg/configuration.yaml
+      - name: hass check_config
+        run: |
+          hass --script check_config -c cfg 2>&1 | tee check.log
+          if grep -E "ERROR|Invalid config|could not be validated" check.log; then
+            echo "::error::Home Assistant reported configuration errors"
+            exit 1
+          fi

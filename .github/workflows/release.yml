@@ -1,0 +1,69 @@
+name: Release
+
+# Creates a tag + GitHub release (with a ready-to-install zip) whenever the
+# version in VERSION changes on main. To release: bump VERSION, add a
+# "## x.y.z" section to CHANGELOG.md, push.
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: v
+        run: |
+          VERSION="$(tr -d ' \n' < VERSION)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag v$VERSION already exists, nothing to release."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release notes from CHANGELOG.md
+        if: steps.v.outputs.exists == 'false'
+        run: |
+          awk -v v="${{ steps.v.outputs.version }}" '
+            $0 ~ "^## " v { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          {
+            echo
+            echo "### Install"
+            echo "Download **notification-center-v${{ steps.v.outputs.version }}.zip** below and follow the [installation steps](https://github.com/${{ github.repository }}#installation-about-10-minutes)."
+            echo
+            echo "Requires Home Assistant 2025.9 or newer."
+          } >> notes.md
+          cat notes.md
+
+      - name: Build zip
+        if: steps.v.outputs.exists == 'false'
+        run: |
+          git archive --format=zip --prefix=notification-center/ \
+            -o "notification-center-v${{ steps.v.outputs.version }}.zip" HEAD
+
+      - name: Create tag and release
+        if: steps.v.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.v.outputs.version }}" \
+            "notification-center-v${{ steps.v.outputs.version }}.zip" \
+            --target "${{ github.sha }}" \
+            --title "Notification Center ${{ steps.v.outputs.version }}" \
+            --notes-file notes.md \
+            --latest

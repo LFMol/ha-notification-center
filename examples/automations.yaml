@@ -1,0 +1,85 @@
+# Example automations using the Notification Center.
+# Replace the entity ids with your own.
+
+- id: nc_example_postbox
+  alias: "NC example · Postbox opened"
+  mode: single
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.postbox_door
+      from: "off"
+      to: "on"
+  actions:
+    - action: script.notification_center_push
+      data:
+        priority: 2
+        category: Post
+        title: Postbox
+        message: "The postbox was opened at {{ now().strftime('%H:%M') }}."
+        person_notify: "1,2"
+        dedup_key: postbox
+        cooldown_minutes: 30
+        task_description: Please check and empty the postbox.
+        task_due_date: "{{ now().strftime('%Y-%m-%d') }}"
+
+- id: nc_example_device_offline
+  alias: "NC example · Device unavailable"
+  mode: queued
+  triggers:
+    - trigger: state
+      entity_id:
+        - climate.thermostat
+        - climate.bedroom_airco
+      to: unavailable
+      for: "00:10:00"
+  actions:
+    - action: script.notification_center_push
+      data:
+        priority: 4            # no person_notify → inbox only, no push
+        category: System
+        title: "{{ state_attr(trigger.entity_id, 'friendly_name') }} offline"
+        message: Unavailable for more than 10 minutes.
+        dedup_key: "offline_{{ trigger.entity_id }}"
+
+- id: nc_example_security_person_1_only
+  alias: "NC example · Person at back door while away"
+  mode: single
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.back_door_person_detected
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id: zone.home
+      state: "0"
+  actions:
+    - action: script.notification_center_push
+      data:
+        priority: 1
+        category: Security
+        title: Person at back door
+        message: Nobody is home.
+        person_notify: "1"
+        dedup_key: back_door_person
+        cooldown_minutes: 5
+      response_variable: nc
+    - action: system_log.write
+      data:
+        level: info
+        message: "NC result: {{ nc }}"
+
+- id: nc_example_daily_energy
+  alias: "NC example · Daily energy summary (P5 info)"
+  mode: single
+  triggers:
+    - trigger: time
+      at: "21:00:00"
+  actions:
+    - action: script.notification_center_push
+      data:
+        priority: 5
+        category: Energy
+        title: Energy today
+        message: "The heat pump used {{ states('sensor.heat_pump_energy_today') }} kWh today."
+        person_notify: all
+        dedup_key: daily_energy

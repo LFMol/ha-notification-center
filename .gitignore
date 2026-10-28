@@ -1,0 +1,10 @@
+# Local test configurations and Python leftovers
+cfg/
+check.log
+__pycache__/
+*.pyc
+.venv/
+# Release archives are attached to GitHub releases, not committed
+*.zip
+.DS_Store
+Thumbs.db

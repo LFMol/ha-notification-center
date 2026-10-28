@@ -1,0 +1,471 @@
+# Notification Center dashboard — built-in cards only (no HACS needed).
+# Prefer a foldable "Send notification" row? Use notification_center.yaml
+# (needs fold-entity-row from HACS).
+#
+# Install: Settings → Dashboards → Add dashboard → New dashboard from scratch
+#   → open it → ⋮ → Edit dashboard → ⋮ → Raw configuration editor → paste this file.
+
+title: Notification Center
+views:
+  # ════════════════════════════════════════════════════════════════════
+  # INBOX
+  # ════════════════════════════════════════════════════════════════════
+  - title: Inbox
+    path: inbox
+    icon: mdi:bell-badge-outline
+    type: sections
+    max_columns: 3
+    sections:
+      # ── Header ──────────────────────────────────────────────────────
+      - type: grid
+        column_span: 3
+        cards:
+          - type: markdown
+            text_only: true
+            grid_options:
+              columns: 18
+            content: |-
+              {%- set t = states('input_text.nc_todo_entity') | trim -%}
+              {%- set t = t if t.startswith('todo.') else 'todo.notification_center' -%}
+              {%- set open = states(t) | int(0) -%}
+              {%- set paused = is_state('input_boolean.nc_push_paused', 'on') -%}
+              # Notification Center
+              {{ open }} open {{ 'item' if open == 1 else 'items' }} &nbsp;·&nbsp; pushes {{ '⏸️ paused' if paused else 'active' }} &nbsp;·&nbsp; last change {{ as_local(states[t].last_changed).strftime('%d-%m %H:%M') if states[t] else '—' }}
+          - type: tile
+            entity: todo.notification_center
+            name: Open items
+            icon: mdi:inbox-full-outline
+            color: primary
+            grid_options:
+              columns: 9
+            tap_action:
+              action: more-info
+          - type: tile
+            entity: input_boolean.nc_push_paused
+            name: Pause phone pushes
+            icon: mdi:bell-off-outline
+            color: amber
+            grid_options:
+              columns: 9
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
+
+      # ── Inbox ───────────────────────────────────────────────────────
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Inbox
+            heading_style: title
+            icon: mdi:inbox-outline
+          - type: todo-list
+            entity: todo.notification_center
+            display_order: alpha_asc
+            hide_create: true
+
+      # ── New notification ────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: New notification
+            heading_style: title
+            icon: mdi:message-plus-outline
+          - type: entities
+            state_color: true
+            entities:
+              - entity: input_select.nc_compose_priority
+                name: Priority
+              - entity: input_select.nc_compose_category
+                name: Category
+              - entity: input_text.nc_compose_title
+                name: Title
+              - entity: input_text.nc_compose_message
+                name: Message
+              - entity: input_text.nc_compose_dedup_key
+                name: Dedup key
+              - entity: input_number.nc_compose_cooldown
+                name: Cooldown
+              - type: section
+                label: Recipients
+              - entity: switch.nc_recipient_1
+                icon: mdi:numeric-1-circle
+              - entity: switch.nc_recipient_2
+                icon: mdi:numeric-2-circle
+              - entity: switch.nc_recipient_3
+                icon: mdi:numeric-3-circle
+              - entity: switch.nc_recipient_4
+                icon: mdi:numeric-4-circle
+              - entity: switch.nc_recipient_5
+                icon: mdi:numeric-5-circle
+              - type: divider
+              - type: button
+                name: Send notification
+                icon: mdi:send
+                action_name: Send
+                tap_action:
+                  action: perform-action
+                  perform_action: script.nc_send_from_dashboard
+
+  # ════════════════════════════════════════════════════════════════════
+  # PEOPLE
+  # ════════════════════════════════════════════════════════════════════
+  - title: People
+    path: people
+    icon: mdi:account-multiple-outline
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: markdown
+            text_only: true
+            content: |-
+              # People
+              Choose a Home Assistant user per slot; their phone is filled in automatically.
+              Use the slot numbers in your automations, e.g. `person_notify: "1,3,5"`.
+          - type: tile
+            entity: script.nc_refresh_people_lists
+            name: Refresh user and phone lists
+            icon: mdi:account-sync
+            hide_state: true
+            grid_options:
+              columns: 6
+            tap_action:
+              action: perform-action
+              perform_action: script.nc_refresh_people_lists
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Person 1
+            heading_style: subtitle
+            icon: mdi:numeric-1-circle
+          - type: tile
+            entity: input_select.nc_person_1_select
+            name: User
+            icon: mdi:account
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: input_select.nc_person_1_notify_select
+            name: Phone
+            icon: mdi:cellphone
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: script.notification_center_push
+            name: Send test notification
+            icon: mdi:cellphone-check
+            color: primary
+            hide_state: true
+            tap_action:
+              action: perform-action
+              perform_action: script.notification_center_push
+              data:
+                priority: 2
+                category: System
+                title: Test
+                message: Test notification from the Notification Center
+                person_notify: "1"
+                dedup_key: nc_test_1
+            icon_tap_action:
+              action: none
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Person 2
+            heading_style: subtitle
+            icon: mdi:numeric-2-circle
+          - type: tile
+            entity: input_select.nc_person_2_select
+            name: User
+            icon: mdi:account
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: input_select.nc_person_2_notify_select
+            name: Phone
+            icon: mdi:cellphone
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: script.notification_center_push
+            name: Send test notification
+            icon: mdi:cellphone-check
+            color: primary
+            hide_state: true
+            tap_action:
+              action: perform-action
+              perform_action: script.notification_center_push
+              data:
+                priority: 2
+                category: System
+                title: Test
+                message: Test notification from the Notification Center
+                person_notify: "2"
+                dedup_key: nc_test_2
+            icon_tap_action:
+              action: none
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Person 3
+            heading_style: subtitle
+            icon: mdi:numeric-3-circle
+          - type: tile
+            entity: input_select.nc_person_3_select
+            name: User
+            icon: mdi:account
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: input_select.nc_person_3_notify_select
+            name: Phone
+            icon: mdi:cellphone
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: script.notification_center_push
+            name: Send test notification
+            icon: mdi:cellphone-check
+            color: primary
+            hide_state: true
+            tap_action:
+              action: perform-action
+              perform_action: script.notification_center_push
+              data:
+                priority: 2
+                category: System
+                title: Test
+                message: Test notification from the Notification Center
+                person_notify: "3"
+                dedup_key: nc_test_3
+            icon_tap_action:
+              action: none
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Person 4
+            heading_style: subtitle
+            icon: mdi:numeric-4-circle
+          - type: tile
+            entity: input_select.nc_person_4_select
+            name: User
+            icon: mdi:account
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: input_select.nc_person_4_notify_select
+            name: Phone
+            icon: mdi:cellphone
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: script.notification_center_push
+            name: Send test notification
+            icon: mdi:cellphone-check
+            color: primary
+            hide_state: true
+            tap_action:
+              action: perform-action
+              perform_action: script.notification_center_push
+              data:
+                priority: 2
+                category: System
+                title: Test
+                message: Test notification from the Notification Center
+                person_notify: "4"
+                dedup_key: nc_test_4
+            icon_tap_action:
+              action: none
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Person 5
+            heading_style: subtitle
+            icon: mdi:numeric-5-circle
+          - type: tile
+            entity: input_select.nc_person_5_select
+            name: User
+            icon: mdi:account
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: input_select.nc_person_5_notify_select
+            name: Phone
+            icon: mdi:cellphone
+            hide_state: true
+            features_position: inline
+            features:
+              - type: select-options
+          - type: tile
+            entity: script.notification_center_push
+            name: Send test notification
+            icon: mdi:cellphone-check
+            color: primary
+            hide_state: true
+            tap_action:
+              action: perform-action
+              perform_action: script.notification_center_push
+              data:
+                priority: 2
+                category: System
+                title: Test
+                message: Test notification from the Notification Center
+                person_notify: "5"
+                dedup_key: nc_test_5
+            icon_tap_action:
+              action: none
+
+  # ════════════════════════════════════════════════════════════════════
+  # SETTINGS
+  # ════════════════════════════════════════════════════════════════════
+  - title: Settings
+    path: settings
+    icon: mdi:cog-outline
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: markdown
+            text_only: true
+            content: |-
+              # Settings
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Behaviour
+            heading_style: title
+            icon: mdi:tune-variant
+          - type: tile
+            entity: input_boolean.nc_push_paused
+            name: Pause all phone pushes
+            icon: mdi:bell-off-outline
+            color: amber
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
+          - type: tile
+            entity: input_boolean.nc_buttons_hidden
+            name: Hide Acknowledge / Done buttons
+            icon: mdi:gesture-tap-button
+            color: amber
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
+          - type: heading
+            heading: Advanced
+            heading_style: subtitle
+            icon: mdi:wrench-outline
+          - type: entities
+            entities:
+              - entity: input_select.nc_todo_select
+                name: To-do list
+              - entity: input_select.nc_open_url_select
+                name: Open on tap
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Status
+            heading_style: title
+            icon: mdi:clipboard-check-outline
+          - type: markdown
+            content: |-
+              {%- set t = states('input_text.nc_todo_entity') | trim -%}
+              {%- set t = t if t.startswith('todo.') else 'todo.notification_center' -%}
+              {%- set phones = integration_entities('mobile_app') | select('match', 'device_tracker\\.') | list | count -%}
+              {%- set ns = namespace(people=0) -%}
+              {%- for n in range(1, 6) -%}
+                {%- set sv = states('input_text.nc_person_' ~ n ~ '_notify') | trim -%}
+                {%- if sv not in ['', 'unknown', 'unavailable'] -%}{%- set ns.people = ns.people + 1 -%}{%- endif -%}
+              {%- endfor -%}
+              | Setup check | |
+              |:--|:--|
+              | Package loaded | {{ '✅ yes' if states.script.notification_center_push is defined else '❌ copy packages/notification_center.yaml and restart' }} |
+              | To-do list `{{ t }}` | {{ '✅ found' if states(t) not in ['unknown', 'unavailable'] else '❌ create a Local To-do list' }} |
+              | Companion-app phones | {{ '✅ ' ~ phones ~ ' found' if phones > 0 else '❌ none — install the Home Assistant app' }} |
+              | People with a phone | {{ '✅ ' ~ ns.people if ns.people > 0 else '⚠️ none — set them on the People tab' }} |
+              | Phone pushes | {{ '⏸️ paused' if is_state('input_boolean.nc_push_paused', 'on') else '✅ active' }} |
+              | Action buttons | {{ '🙈 hidden' if is_state('input_boolean.nc_buttons_hidden', 'on') else '✅ shown' }} |
+
+              <br>
+
+              | # | Person | Phone |
+              |:-:|:--|:--|
+              {% for n in range(1, 6) -%}
+              {%- set nm = states('input_text.nc_person_' ~ n ~ '_name') | trim -%}
+              {%- set sv = states('input_text.nc_person_' ~ n ~ '_notify') | trim | replace('notify.', '') -%}
+              | {{ n }} | {{ nm if nm not in ['', 'unknown'] else '—' }} | {{ sv if sv not in ['', 'unknown'] else '—' }} |
+              {% endfor -%}
+
+      # ── How to use ──────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: How to use in automations
+            heading_style: title
+            icon: mdi:code-braces
+          - type: markdown
+            content: |-
+              {% raw %}
+              Call the script from any automation or script:
+
+              ```yaml
+              action: script.notification_center_push
+              data:
+                priority: 2
+                category: Post
+                title: Postbox
+                message: The postbox was opened.
+                person_notify: "1,2"
+                dedup_key: postbox
+                cooldown_minutes: 30
+                task_description: Please empty the postbox.
+                task_due_date: "2026-10-28"
+              ```
+
+              | Parameter | Explanation |
+              |:--|:--|
+              | `priority` | 1 = 🔴 critical, 2 = 🟠 high, 3 = 🟡 normal *(default)*, 4 = 🟢 low, 5 = 🟣 info. Sets the colour and how urgent the push is. |
+              | `category` | Home, Post, Parcel, Network, Security, Energy, System — sets the icon. Anything else shows 🏷️. |
+              | `title` | Short title of the notification (use at least a title or a message). |
+              | `message` | The text of the notification. |
+              | `person_notify` | Who gets a phone push: slot numbers from the People tab, e.g. `"1,3,5"`, or `all`. Empty or `none` = inbox only. |
+              | `dedup_key` | Same key while the item is still open → the item is updated instead of added again. |
+              | `cooldown_minutes` | With a dedup key: ignore repeats within this many minutes. |
+              | `task_description` | Extra text on the inbox item. |
+              | `task_due_date` / `task_due_datetime` | Due date `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` (date & time wins). |
+
+              Every call is added to the inbox. A phone push is sent only to the persons in `person_notify`, with **Acknowledge** / **Done** buttons.
+              {% endraw %}

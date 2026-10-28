@@ -1,0 +1,949 @@
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  Notification Center for Home Assistant                             ║
+# ║  A to-do based inbox with 5 priorities, dedup/cooldown, push        ║
+# ║  routing to up to 5 people, Acknowledge / Done buttons.             ║
+# ║                                                                      ║
+# ║  Version : 1.0.0                                                     ║
+# ║  Requires: Home Assistant 2025.9+, Local To-do, Companion app        ║
+# ║  License : MIT                                                       ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+#
+# Install: see README.md. In short:
+#   1. configuration.yaml →  homeassistant: { packages: !include_dir_named packages }
+#   2. Copy this file to /config/packages/notification_center.yaml
+#   3. Settings → Integrations → Local To-do → create list "Notification center"
+#   4. Restart, then add a dashboard and paste dashboards/notification_center_core.yaml
+#      into its Raw configuration editor.
+#   5. People tab: pick a user per slot (1–5). Settings tab: check "Setup check".
+#
+# Priorities:  P1 🔴 Critical · P2 🟠 High · P3 🟡 Normal · P4 🟢 Low · P5 🟣 Info
+# Main entry point:  script.notification_center_push
+# ------------------------------------------------------------------------
+
+# ── Settings & compose helpers ──────────────────────────────────────────
+# No `initial:` on settings, so values you enter survive restarts.
+
+input_text:
+  nc_todo_entity:
+    name: "NC · To-do list entity"
+    icon: mdi:format-list-checks
+    max: 100
+  nc_open_url:
+    name: "NC · Open on tap (dashboard path)"
+    icon: mdi:link-variant
+    max: 100
+
+  nc_person_1_name: { name: "NC · Person 1 name", icon: mdi:numeric-1-circle-outline, max: 50 }
+  nc_person_1_notify: { name: "NC · Person 1 notify service", icon: mdi:cellphone-message, max: 100 }
+  nc_person_2_name: { name: "NC · Person 2 name", icon: mdi:numeric-2-circle-outline, max: 50 }
+  nc_person_2_notify: { name: "NC · Person 2 notify service", icon: mdi:cellphone-message, max: 100 }
+  nc_person_3_name: { name: "NC · Person 3 name", icon: mdi:numeric-3-circle-outline, max: 50 }
+  nc_person_3_notify: { name: "NC · Person 3 notify service", icon: mdi:cellphone-message, max: 100 }
+  nc_person_4_name: { name: "NC · Person 4 name", icon: mdi:numeric-4-circle-outline, max: 50 }
+  nc_person_4_notify: { name: "NC · Person 4 notify service", icon: mdi:cellphone-message, max: 100 }
+  nc_person_5_name: { name: "NC · Person 5 name", icon: mdi:numeric-5-circle-outline, max: 50 }
+  nc_person_5_notify: { name: "NC · Person 5 notify service", icon: mdi:cellphone-message, max: 100 }
+
+  nc_compose_title:
+    name: "Title"
+    icon: mdi:format-title
+    max: 100
+  nc_compose_message:
+    name: "Message"
+    icon: mdi:message-text-outline
+    max: 255
+  nc_compose_dedup_key:
+    name: "Dedup key (optional)"
+    icon: mdi:key-variant
+    max: 100
+
+input_select:
+  # People dropdowns. Options are filled at startup by
+  # script.nc_refresh_people_lists from your HA persons and Companion-app
+  # phones; the choice itself is stored in input_text.nc_person_N_*.
+  nc_person_1_select: { name: "NC · Person 1", icon: mdi:numeric-1-circle-outline, options: ["— none —"] }
+  nc_person_2_select: { name: "NC · Person 2", icon: mdi:numeric-2-circle-outline, options: ["— none —"] }
+  nc_person_3_select: { name: "NC · Person 3", icon: mdi:numeric-3-circle-outline, options: ["— none —"] }
+  nc_person_4_select: { name: "NC · Person 4", icon: mdi:numeric-4-circle-outline, options: ["— none —"] }
+  nc_person_5_select: { name: "NC · Person 5", icon: mdi:numeric-5-circle-outline, options: ["— none —"] }
+  nc_person_1_notify_select: { name: "NC · Person 1 phone", icon: mdi:cellphone-message, options: ["— none —"] }
+  nc_person_2_notify_select: { name: "NC · Person 2 phone", icon: mdi:cellphone-message, options: ["— none —"] }
+  nc_person_3_notify_select: { name: "NC · Person 3 phone", icon: mdi:cellphone-message, options: ["— none —"] }
+  nc_person_4_notify_select: { name: "NC · Person 4 phone", icon: mdi:cellphone-message, options: ["— none —"] }
+  nc_person_5_notify_select: { name: "NC · Person 5 phone", icon: mdi:cellphone-message, options: ["— none —"] }
+  # Settings dropdowns (filled by script.nc_refresh_people_lists); the choice
+  # is stored in input_text.nc_todo_entity / input_text.nc_open_url.
+  nc_todo_select:
+    name: "NC · To-do list"
+    icon: mdi:format-list-checks
+    options: ["Notification center · todo.notification_center"]
+  nc_open_url_select:
+    name: "NC · Open on tap"
+    icon: mdi:link-variant
+    options: ["Home Assistant app (default)"]
+  nc_compose_priority:
+    name: "Priority"
+    icon: mdi:alert-circle-outline
+    options:
+      - "P1 · Critical"
+      - "P2 · High"
+      - "P3 · Normal"
+      - "P4 · Low"
+      - "P5 · Info"
+  nc_compose_category:
+    name: "Category"
+    icon: mdi:shape-outline
+    options:
+      - General
+      - Home
+      - Post
+      - Parcel
+      - Network
+      - Security
+      - Energy
+      - System
+
+input_number:
+  nc_compose_cooldown:
+    name: "Cooldown (minutes)"
+    icon: mdi:timer-sand
+    min: 0
+    max: 60
+    step: 1
+    mode: slider
+    unit_of_measurement: min
+
+input_boolean:
+  # Off = normal operation, so a fresh install works without configuration.
+  nc_push_paused:
+    name: "NC · Pause phone pushes"
+    icon: mdi:bell-off-outline
+  # Recipient choice on the dashboard (shown as switches named after the people)
+  nc_compose_to_1: { name: "NC · Send to slot 1", icon: mdi:numeric-1-circle }
+  nc_compose_to_2: { name: "NC · Send to slot 2", icon: mdi:numeric-2-circle }
+  nc_compose_to_3: { name: "NC · Send to slot 3", icon: mdi:numeric-3-circle }
+  nc_compose_to_4: { name: "NC · Send to slot 4", icon: mdi:numeric-4-circle }
+  nc_compose_to_5: { name: "NC · Send to slot 5", icon: mdi:numeric-5-circle }
+  nc_buttons_hidden:
+    name: "NC · Hide action buttons"
+    icon: mdi:gesture-tap-button
+
+# ── Recipient switches (dashboard) ──────────────────────────────────────
+# Named after the person in each slot on the People tab; the on/off state is
+# stored in input_boolean.nc_compose_to_N.
+
+template:
+  - switch:
+      - name: >-
+          {%- set nm = states('input_text.nc_person_1_name') | trim -%}
+          {{ nm if nm not in ['', 'unknown', 'unavailable'] else 'Person 1 — not set' }}
+        unique_id: nc_recipient_1
+        default_entity_id: switch.nc_recipient_1
+        icon: mdi:numeric-1-circle
+        state: "{{ is_state('input_boolean.nc_compose_to_1', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.nc_compose_to_1
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.nc_compose_to_1
+      - name: >-
+          {%- set nm = states('input_text.nc_person_2_name') | trim -%}
+          {{ nm if nm not in ['', 'unknown', 'unavailable'] else 'Person 2 — not set' }}
+        unique_id: nc_recipient_2
+        default_entity_id: switch.nc_recipient_2
+        icon: mdi:numeric-2-circle
+        state: "{{ is_state('input_boolean.nc_compose_to_2', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.nc_compose_to_2
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.nc_compose_to_2
+      - name: >-
+          {%- set nm = states('input_text.nc_person_3_name') | trim -%}
+          {{ nm if nm not in ['', 'unknown', 'unavailable'] else 'Person 3 — not set' }}
+        unique_id: nc_recipient_3
+        default_entity_id: switch.nc_recipient_3
+        icon: mdi:numeric-3-circle
+        state: "{{ is_state('input_boolean.nc_compose_to_3', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.nc_compose_to_3
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.nc_compose_to_3
+      - name: >-
+          {%- set nm = states('input_text.nc_person_4_name') | trim -%}
+          {{ nm if nm not in ['', 'unknown', 'unavailable'] else 'Person 4 — not set' }}
+        unique_id: nc_recipient_4
+        default_entity_id: switch.nc_recipient_4
+        icon: mdi:numeric-4-circle
+        state: "{{ is_state('input_boolean.nc_compose_to_4', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.nc_compose_to_4
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.nc_compose_to_4
+      - name: >-
+          {%- set nm = states('input_text.nc_person_5_name') | trim -%}
+          {{ nm if nm not in ['', 'unknown', 'unavailable'] else 'Person 5 — not set' }}
+        unique_id: nc_recipient_5
+        default_entity_id: switch.nc_recipient_5
+        icon: mdi:numeric-5-circle
+        state: "{{ is_state('input_boolean.nc_compose_to_5', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.nc_compose_to_5
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.nc_compose_to_5
+
+# ── Scripts ─────────────────────────────────────────────────────────────
+
+script:
+  notification_center_push:
+    alias: "Notification Center · Push"
+    description: >-
+      Adds an item to the Notification Center to-do list (or updates the open
+      item with the same dedup key) and pushes it to the persons listed in
+      person_notify, e.g. "1,3,5".
+      Returns {status, item_key, summary, pushed_to}.
+    icon: mdi:bell-badge-outline
+    mode: queued
+    max: 25
+    fields:
+      priority:
+        name: Priority
+        description: 1 = critical, 2 = high, 3 = normal, 4 = low, 5 = info.
+        example: 2
+        default: 3
+        selector:
+          number: { min: 1, max: 5, mode: box }
+      category:
+        name: Category
+        description: Home, Post, Parcel, Network, Security, Energy, System (anything else → General icon).
+        example: Parcel
+        selector:
+          text:
+      title:
+        name: Title
+        example: Postbox
+        selector:
+          text:
+      message:
+        name: Message
+        example: The postbox was opened.
+        selector:
+          text: { multiline: true }
+      person_notify:
+        name: Notify persons
+        description: >-
+          Which persons get a phone push, e.g. 1,3,5 for persons 1, 3 and 5.
+          Use "all" for everyone; leave empty for inbox only (no push).
+          Configured person names also work, e.g. Alex,3.
+        example: "1,3,5"
+        selector:
+          text:
+      dedup_key:
+        name: Dedup key
+        description: Stable key; an open item with the same key is updated instead of duplicated.
+        example: postbox
+        selector:
+          text:
+      cooldown_minutes:
+        name: Cooldown
+        description: Minimum minutes between two notifications with the same dedup key.
+        example: 30
+        default: 0
+        selector:
+          number: { min: 0, max: 10080, mode: box, unit_of_measurement: min }
+      task_description:
+        name: Task description
+        example: The postbox was opened at 09:07. Please empty it.
+        selector:
+          text: { multiline: true }
+      task_due_date:
+        name: Due date
+        example: "2026-01-13"
+        selector:
+          date:
+      task_due_datetime:
+        name: Due date & time
+        description: Takes precedence over due date.
+        example: "2026-01-13 18:00:00"
+        selector:
+          datetime:
+
+    sequence:
+      # ── 1. Configuration ──────────────────────────────────────────────
+      - variables:
+          todo_entity: >-
+            {%- set t = states('input_text.nc_todo_entity') | trim -%}
+            {{ t if t.startswith('todo.') else 'todo.notification_center' }}
+          open_url: >-
+            {%- set u = states('input_text.nc_open_url') | trim -%}
+            {{ u if u.startswith('/') or u.startswith('http') else '' }}
+          push_enabled: "{{ not is_state('input_boolean.nc_push_paused', 'on') }}"
+          actionable: "{{ not is_state('input_boolean.nc_buttons_hidden', 'on') }}"
+          persons: >-
+            {%- set bad = ['', 'unknown', 'unavailable', 'none'] -%}
+            {%- set ns = namespace(out=[]) -%}
+            {%- for n in range(1, 6) -%}
+              {%- set name = states('input_text.nc_person_' ~ n ~ '_name') | trim -%}
+              {%- set svc = states('input_text.nc_person_' ~ n ~ '_notify') | trim | replace('notify.', '') -%}
+              {%- set ns.out = ns.out + [{
+                    'id': 'person_' ~ n,
+                    'num': n | string,
+                    'name': name if name | lower not in bad else 'Person ' ~ n,
+                    'service': svc if svc | lower not in bad else ''}] -%}
+            {%- endfor -%}
+            {{ ns.out }}
+
+      # ── 2. Normalise inputs ───────────────────────────────────────────
+      - variables:
+          prio: "{{ [[priority | default(3) | int(3), 1] | max, 5] | min }}"
+          cat: "{{ (category | default('', true) | string | trim) or 'General' }}"
+          ttl: "{{ title | default('', true) | string | trim }}"
+          msg: "{{ message | default('', true) | string | trim }}"
+          key: "{{ dedup_key | default('', true) | string | trim }}"
+          cooldown: "{{ cooldown_minutes | default(0) | int(0) }}"
+          now_ts: "{{ now().timestamp() | int }}"
+          item_key: >-
+            {{ key if key else 'nc_' ~ now().timestamp() | int ~ '_' ~ range(1000, 9999) | random }}
+          task_desc: >-
+            {%- set v = task_description | default('', true) | string | trim -%}
+            {{ '' if v | lower == 'none' else v }}
+          due_date: >-
+            {%- set v = task_due_date | default('', true) | string | trim -%}
+            {{ '' if v | lower == 'none' else v }}
+          due_dt: >-
+            {%- set v = task_due_datetime | default('', true) | string | trim -%}
+            {{ '' if v | lower == 'none' else v }}
+
+          # person_notify "1,3,5" / [1, 3, 5] / "all" / names → list of person ids
+          # (empty or "none" → nobody, inbox only)
+          recipient_ids: >-
+            {%- set raw = person_notify | default('', true) -%}
+            {%- set raw = raw if (raw is iterable and raw is not string and raw is not mapping)
+                               else (raw | string).split(',') -%}
+            {%- set ns = namespace(ids=[]) -%}
+            {%- for r in raw -%}
+              {%- set rr = r | string | trim | lower | replace(' ', '_') -%}
+              {%- if rr in ['all', 'everyone'] -%}
+                {%- set ns.ids = ns.ids + (persons | map(attribute='id') | list) -%}
+              {%- else -%}
+                {%- for p in persons
+                      if rr in [p.id, p.num, p.name | lower | replace(' ', '_')] -%}
+                  {%- set ns.ids = ns.ids + [p.id] -%}
+                {%- endfor -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.ids | unique | list }}
+          # Selected persons that have a notify service configured
+          # → [{'num': '1', 'service': 'mobile_app_x'}, …], one entry per phone
+          targets: >-
+            {%- set ns = namespace(out=[], seen=[]) -%}
+            {%- for p in persons
+                  if p.id in recipient_ids and p.service and p.service not in ns.seen -%}
+              {%- set ns.out = ns.out + [{'num': p.num, 'service': p.service}] -%}
+              {%- set ns.seen = ns.seen + [p.service] -%}
+            {%- endfor -%}
+            {{ ns.out }}
+          should_push: "{{ push_enabled and targets | count > 0 }}"
+          pushed_nums: "{{ (targets | map(attribute='num') | join(',')) if should_push else '' }}"
+
+      # ── 3. Presentation ───────────────────────────────────────────────
+      # 🔴 🟠 🟡 🟢 🟣 are consecutive code points, so alphabetical sort
+      # of the to-do list equals priority order.
+      - variables:
+          prio_emoji: "{{ {1: '🔴', 2: '🟠', 3: '🟡', 4: '🟢'}.get(prio, '🟣') }}"
+          prio_label: "{{ {1: 'Critical', 2: 'High', 3: 'Normal', 4: 'Low'}.get(prio, 'Info') }}"
+          cat_icon: >-
+            {{ {'parcel': '📦', 'post': '📬', 'home': '🏠', 'network': '🌐',
+                'security': '🚨', 'energy': '⚡', 'system': '🛠️'}.get(cat | lower, '🏷️') }}
+          new_summary: >-
+            {%- set head = [prio_emoji ~ ' P' ~ prio, cat_icon, ttl] | select | join(' ') -%}
+            {{ head ~ (' — ' ~ msg if msg else '') }}
+          # Machine-readable tail: dedup key, timestamp, who was pushed (for
+          # Acknowledge / Done updates). Do not remove from items.
+          new_description: >-
+            {{ [task_desc, '[dedup:' ~ item_key ~ '] [ts:' ~ now_ts ~ '] [to:' ~ pushed_nums ~ ']']
+               | select | join('\n\n') }}
+          due_fields: >-
+            {%- if due_dt -%}{{ {'due_datetime': due_dt} }}
+            {%- elif due_date -%}{{ {'due_date': due_date} }}
+            {%- else -%}{{ {} }}{%- endif -%}
+          push_data: >-
+            {%- set d = {'tag': item_key,
+                         'group': 'nc_' ~ (cat | lower),
+                         'channel': 'Notification Center P' ~ prio ~ ' ' ~ prio_label} -%}
+            {%- if open_url -%}
+              {%- set d = dict(d, url=open_url, clickAction=open_url) -%}
+            {%- endif -%}
+            {%- if prio == 1 -%}
+              {%- set d = dict(d, ttl=0, priority='high',
+                               push={'interruption-level': 'time-sensitive'}) -%}
+            {%- elif prio == 5 -%}
+              {%- set d = dict(d, importance='low',
+                               push={'interruption-level': 'passive'}) -%}
+            {%- endif -%}
+            {{ d }}
+
+      # ── 4. Dedup / cooldown ───────────────────────────────────────────
+      - action: todo.get_items
+        target:
+          entity_id: "{{ todo_entity }}"
+        data:
+          status: needs_action
+        response_variable: todo_resp
+
+      - variables:
+          matches: >-
+            {%- set items = todo_resp[todo_entity]['items'] | default([], true) -%}
+            {{ items
+               | selectattr('description', 'string')
+               | selectattr('description', 'contains', '[dedup:' ~ key ~ ']')
+               | list if key else [] }}
+          existing: "{{ matches[0] if matches | count > 0 else none }}"
+          existing_id: >-
+            {{ (existing.uid | default(existing.summary, true)) if existing else '' }}
+          existing_ts: >-
+            {%- set t = existing.description | regex_findall('\\[ts:(\\d+)\\]') if existing else [] -%}
+            {{ t | last | int(0) if t else 0 }}
+          in_cooldown: >-
+            {{ existing_ts > 0 and cooldown > 0 and (now_ts - existing_ts) < cooldown * 60 }}
+          result: >-
+            {{ {'status': 'cooldown' if in_cooldown else ('updated' if existing_id else 'added'),
+                'item_key': item_key,
+                'summary': new_summary,
+                'pushed_to': [] if in_cooldown or not should_push
+                             else targets | map(attribute='service') | list} }}
+
+      - if:
+          - condition: template
+            value_template: "{{ in_cooldown }}"
+        then:
+          - stop: Dedup cooldown active
+            response_variable: result
+
+      # ── 5. Write to the inbox ─────────────────────────────────────────
+      - if:
+          - condition: template
+            value_template: "{{ existing_id | length > 0 }}"
+        then:
+          - action: todo.update_item
+            target:
+              entity_id: "{{ todo_entity }}"
+            data: >-
+              {{ dict(item=existing_id, rename=new_summary,
+                      description=new_description, **due_fields) }}
+        else:
+          - action: todo.add_item
+            target:
+              entity_id: "{{ todo_entity }}"
+            data: >-
+              {{ dict(item=new_summary, description=new_description, **due_fields) }}
+
+      # ── 6. Push to the selected people ────────────────────────────────
+      - if:
+          - condition: template
+            value_template: "{{ should_push }}"
+        then:
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - action: "notify.{{ repeat.item.service }}"
+                  continue_on_error: true
+                  data:
+                    title: "{{ prio_emoji }} P{{ prio }} {{ ttl }}"
+                    message: "{{ msg or ttl or 'New notification' }}"
+                    # Buttons carry the person number, so we know who pressed
+                    data: >-
+                      {%- set n = repeat.item.num -%}
+                      {%- if actionable -%}
+                        {{ dict(push_data, actions=[
+                             {'action': 'NC_ACK::' ~ n ~ '::' ~ item_key, 'title': 'Acknowledge'},
+                             {'action': 'NC_DONE::' ~ n ~ '::' ~ item_key, 'title': 'Done'}]) }}
+                      {%- else -%}
+                        {{ push_data }}
+                      {%- endif -%}
+
+      - stop: Done
+        response_variable: result
+
+  nc_set_status:
+    alias: "Notification Center · Set status"
+    description: >-
+      Marks an inbox item as acknowledged or done, records who did
+      it, and updates (or clears) the notification on every phone that got it.
+      Used by the phone buttons, but can also be called from NFC tags, voice,
+      or other automations.
+    icon: mdi:progress-check
+    mode: queued
+    max: 25
+    fields:
+      item_key:
+        name: Item key
+        description: The dedup key (or auto key) of the item.
+        required: true
+        example: postbox
+        selector:
+          text:
+      status:
+        name: Status
+        required: true
+        default: acknowledged
+        selector:
+          select:
+            options:
+              - { label: "👀 Acknowledged", value: acknowledged }
+              - { label: "✅ Done", value: done }
+      person:
+        name: Person
+        description: Who did it — 1–5 or a configured name. Optional.
+        example: "1"
+        selector:
+          text:
+    sequence:
+      - variables:
+          todo_entity: >-
+            {%- set t = states('input_text.nc_todo_entity') | trim -%}
+            {{ t if t.startswith('todo.') else 'todo.notification_center' }}
+          actionable: "{{ not is_state('input_boolean.nc_buttons_hidden', 'on') }}"
+          key: "{{ item_key | default('', true) | string | trim }}"
+          st: >-
+            {%- set s = status | default('acknowledged', true) | string | lower | trim -%}
+            {{ {'ack': 'acknowledged', 'acknowledge': 'acknowledged',
+                'wip': 'acknowledged', 'processing': 'acknowledged',
+                'complete': 'done', 'completed': 'done'}.get(s, s) }}
+          persons: >-
+            {%- set bad = ['', 'unknown', 'unavailable', 'none'] -%}
+            {%- set ns = namespace(out=[]) -%}
+            {%- for n in range(1, 6) -%}
+              {%- set name = states('input_text.nc_person_' ~ n ~ '_name') | trim -%}
+              {%- set svc = states('input_text.nc_person_' ~ n ~ '_notify') | trim | replace('notify.', '') -%}
+              {%- set ns.out = ns.out + [{
+                    'num': n | string,
+                    'name': name if name | lower not in bad else 'Person ' ~ n,
+                    'service': svc if svc | lower not in bad else ''}] -%}
+            {%- endfor -%}
+            {{ ns.out }}
+          who: >-
+            {%- set p = person | default('', true) | string | trim -%}
+            {%- set ns = namespace(name='') -%}
+            {%- for x in persons if p and not ns.name
+                  and (p == x.num or p | lower == x.name | lower) -%}
+              {%- set ns.name = x.name -%}
+            {%- endfor -%}
+            {{ ns.name or p or 'someone' }}
+      - condition: template
+        value_template: "{{ key | length > 0 and st in ['acknowledged', 'done'] }}"
+
+      - action: todo.get_items
+        target:
+          entity_id: "{{ todo_entity }}"
+        data:
+          status: needs_action
+        response_variable: todo_resp
+
+      - variables:
+          item: >-
+            {%- set m = todo_resp[todo_entity]['items'] | default([], true)
+                 | selectattr('description', 'string')
+                 | selectattr('description', 'contains', '[dedup:' ~ key ~ ']')
+                 | list -%}
+            {{ m[0] if m else none }}
+          item_id: "{{ (item.uid | default(item.summary, true)) if item else '' }}"
+          # Phones that received the original push (fallback: everyone configured)
+          to_persons: >-
+            {%- set t = item.description | regex_findall('\\[to:([0-9,]*)\\]') if item else [] -%}
+            {%- set nums = (t | last).split(',') | select | list if t else [] -%}
+            {%- set ns = namespace(out=[], seen=[]) -%}
+            {%- for p in persons
+                  if p.service and (p.num in nums or not nums) and p.service not in ns.seen -%}
+              {%- set ns.out = ns.out + [p] -%}
+              {%- set ns.seen = ns.seen + [p.service] -%}
+            {%- endfor -%}
+            {{ ns.out }}
+          base_summary: >-
+            {{ item.summary | regex_replace(' · (👀|🔧|✅) .*$', '') if item else '' }}
+          emoji: "{{ '👀' if st == 'acknowledged' else '✅' }}"
+          verb: "{{ 'Acknowledged' if st == 'acknowledged' else 'Done' }}"
+          state_line: "{{ emoji }} {{ verb }} by {{ who }} · {{ now().strftime('%d-%m %H:%M') }}"
+          new_desc: >-
+            {%- set d = (item.description if item else '') | regex_replace('\\n*(👀|🔧|✅) [^\\n]*', '') -%}
+            {{ d | replace('[dedup:', state_line ~ '\n\n[dedup:', 1) if '[dedup:' in d
+               else [d, state_line] | select | join('\n\n') }}
+
+      # Done → complete the item and clear every phone
+      - if:
+          - condition: template
+            value_template: "{{ st == 'done' }}"
+        then:
+          - if:
+              - condition: template
+                value_template: "{{ item_id | length > 0 }}"
+            then:
+              - action: todo.update_item
+                target:
+                  entity_id: "{{ todo_entity }}"
+                data:
+                  item: "{{ item_id }}"
+                  rename: "{{ base_summary }} · ✅ {{ who }}"
+                  description: "{{ new_desc }}"
+                  status: completed
+          - repeat:
+              for_each: "{{ to_persons }}"
+              sequence:
+                - action: "notify.{{ repeat.item.service }}"
+                  continue_on_error: true
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ key }}"
+          - stop: Done
+
+      # Acknowledged → mark in inbox, quietly update the phones (only Done left)
+      - condition: template
+        value_template: "{{ item_id | length > 0 }}"
+      - action: todo.update_item
+        target:
+          entity_id: "{{ todo_entity }}"
+        data:
+          item: "{{ item_id }}"
+          rename: "{{ base_summary }} · {{ emoji }} {{ who }}"
+          description: "{{ new_desc }}"
+      - repeat:
+          for_each: "{{ to_persons }}"
+          sequence:
+            - action: "notify.{{ repeat.item.service }}"
+              continue_on_error: true
+              data:
+                title: "{{ emoji }} {{ verb }} by {{ who }}"
+                message: "{{ base_summary }}"
+                data: >-
+                  {%- set n = repeat.item.num -%}
+                  {%- set acts = [{'action': 'NC_DONE::' ~ n ~ '::' ~ key, 'title': 'Done'}] -%}
+                  {%- set d = {'tag': key, 'alert_once': true,
+                               'push': {'interruption-level': 'passive'}} -%}
+                  {{ dict(d, actions=acts) if actionable else d }}
+
+  nc_send_from_dashboard:
+    alias: "Notification Center · Send from dashboard"
+    description: Sends the message composed in the dashboard and clears the form.
+    icon: mdi:send
+    mode: single
+    sequence:
+      - variables:
+          c_title: "{{ states('input_text.nc_compose_title') | trim }}"
+          c_message: "{{ states('input_text.nc_compose_message') | trim }}"
+          c_key: "{{ states('input_text.nc_compose_dedup_key') | trim }}"
+          c_persons: >-
+            {%- set ns = namespace(out=[]) -%}
+            {%- for n in range(1, 6) if is_state('input_boolean.nc_compose_to_' ~ n, 'on') -%}
+              {%- set ns.out = ns.out + [n | string] -%}
+            {%- endfor -%}
+            {{ ns.out | join(',') if ns.out else 'none' }}
+      - condition: template
+        value_template: >-
+          {{ c_title not in ['', 'unknown', 'unavailable']
+             or c_message not in ['', 'unknown', 'unavailable'] }}
+      - action: script.notification_center_push
+        data:
+          priority: "{{ states('input_select.nc_compose_priority')[1:2] | int(3) }}"
+          category: "{{ states('input_select.nc_compose_category') }}"
+          title: "{{ c_title if c_title not in ['unknown', 'unavailable'] else '' }}"
+          message: "{{ c_message if c_message not in ['unknown', 'unavailable'] else '' }}"
+          person_notify: "{{ c_persons }}"
+          dedup_key: "{{ c_key if c_key not in ['unknown', 'unavailable'] else '' }}"
+          cooldown_minutes: "{{ states('input_number.nc_compose_cooldown') | int(0) }}"
+      - action: input_text.set_value
+        target:
+          entity_id:
+            - input_text.nc_compose_title
+            - input_text.nc_compose_message
+            - input_text.nc_compose_dedup_key
+        data:
+          value: ""
+
+  nc_refresh_people_lists:
+    alias: "Notification Center · Refresh people lists"
+    description: >-
+      Fills the person and phone dropdowns with all Home Assistant persons and
+      all Companion-app notify services, and restores each slot's saved choice.
+    icon: mdi:account-sync
+    mode: restart
+    sequence:
+      - variables:
+          none_opt: "— none —"
+          person_names: >-
+            {{ states.person | map(attribute='name') | unique | sort | list }}
+          notify_services: >-
+            {%- set ns = namespace(out=[]) -%}
+            {%- for e in integration_entities('mobile_app') if e.startswith('device_tracker.') -%}
+              {%- set d = device_attr(e, 'name') -%}
+              {%- if d -%}{%- set ns.out = ns.out + ['mobile_app_' ~ (d | slugify)] -%}{%- endif -%}
+            {%- endfor -%}
+            {{ ns.out | unique | sort | list }}
+      - repeat:
+          for_each: [1, 2, 3, 4, 5]
+          sequence:
+            - variables:
+                bad: ['', 'unknown', 'unavailable', 'none']
+                cur_name: "{{ states('input_text.nc_person_' ~ repeat.item ~ '_name') | trim }}"
+                cur_svc: >-
+                  {{ states('input_text.nc_person_' ~ repeat.item ~ '_notify') | trim | replace('notify.', '') }}
+                name_opts: >-
+                  {{ ([none_opt] + person_names
+                      + ([cur_name] if cur_name | lower not in bad and cur_name not in person_names else []))
+                     | unique | list }}
+                svc_opts: >-
+                  {{ ([none_opt] + notify_services
+                      + ([cur_svc] if cur_svc | lower not in bad and cur_svc not in notify_services else []))
+                     | unique | list }}
+            - action: input_select.set_options
+              target:
+                entity_id: "input_select.nc_person_{{ repeat.item }}_select"
+              data:
+                options: "{{ name_opts }}"
+            - action: input_select.select_option
+              target:
+                entity_id: "input_select.nc_person_{{ repeat.item }}_select"
+              data:
+                option: "{{ cur_name if cur_name | lower not in bad else none_opt }}"
+            - action: input_select.set_options
+              target:
+                entity_id: "input_select.nc_person_{{ repeat.item }}_notify_select"
+              data:
+                options: "{{ svc_opts }}"
+            - action: input_select.select_option
+              target:
+                entity_id: "input_select.nc_person_{{ repeat.item }}_notify_select"
+              data:
+                option: "{{ cur_svc if cur_svc | lower not in bad else none_opt }}"
+
+      # Settings: to-do list dropdown ("Name · todo.entity_id")
+      - variables:
+          cur_todo: >-
+            {%- set t = states('input_text.nc_todo_entity') | trim -%}
+            {{ t if t.startswith('todo.') else 'todo.notification_center' }}
+          todo_opts: >-
+            {%- set ns = namespace(out=[]) -%}
+            {%- for e in states.todo | sort(attribute='name') -%}
+              {%- set ns.out = ns.out + [e.name ~ ' · ' ~ e.entity_id] -%}
+            {%- endfor -%}
+            {%- if ns.out | map('regex_replace', '^.* · ', '') | select('eq', cur_todo) | list | count == 0 -%}
+              {%- set ns.out = ns.out + [cur_todo ~ ' · ' ~ cur_todo] -%}
+            {%- endif -%}
+            {{ ns.out }}
+      - action: input_select.set_options
+        target:
+          entity_id: input_select.nc_todo_select
+        data:
+          options: "{{ todo_opts }}"
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.nc_todo_select
+        data:
+          option: >-
+            {%- set ns = namespace(o=todo_opts[0]) -%}
+            {%- for o in todo_opts if o.split(' · ')[-1] == cur_todo -%}{%- set ns.o = o -%}{%- endfor -%}
+            {{ ns.o }}
+
+      # Settings: "open on tap" dropdown ("Label · /path")
+      - variables:
+          default_opt: "Home Assistant app (default)"
+          cur_url: >-
+            {%- set u = states('input_text.nc_open_url') | trim -%}
+            {{ u if u.startswith('/') or u.startswith('http') else '' }}
+          url_opts: >-
+            {%- set base = [default_opt,
+                            'Notification Center inbox · /notification-center/inbox',
+                            'Notification Center (all tabs) · /notification-center',
+                            'Overview · /lovelace/0',
+                            'To-do list · /todo?entity_id=' ~ cur_todo] -%}
+            {%- set known = base | map('regex_replace', '^.* · ', '') | select('eq', cur_url) | list if cur_url else [default_opt] -%}
+            {{ base + (['Custom · ' ~ cur_url] if cur_url and not known else []) }}
+      - action: input_select.set_options
+        target:
+          entity_id: input_select.nc_open_url_select
+        data:
+          options: "{{ url_opts }}"
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.nc_open_url_select
+        data:
+          option: >-
+            {%- set ns = namespace(o=default_opt) -%}
+            {%- for o in url_opts if cur_url and o.split(' · ')[-1] == cur_url -%}{%- set ns.o = o -%}{%- endfor -%}
+            {{ ns.o }}
+
+# ── Automations ─────────────────────────────────────────────────────────
+
+automation:
+  - id: nc_phone_actions
+    alias: "Notification Center · Phone buttons"
+    description: >-
+      Handles the Acknowledge / Done buttons on a push and hands
+      them to script.nc_set_status, together with the person who pressed it.
+    mode: queued
+    max: 25
+    triggers:
+      - trigger: event
+        event_type: mobile_app_notification_action
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.event.data.action is string
+             and trigger.event.data.action.split('::')[0] in ['NC_ACK', 'NC_WIP', 'NC_DONE'] }}
+    actions:
+      - variables:
+          # New format: NC_ACK::<person>::<key>   Old (v1): NC_DONE::<key>
+          parts: "{{ trigger.event.data.action.split('::', 2) }}"
+      - action: script.nc_set_status
+        data:
+          status: "{{ 'done' if parts[0] == 'NC_DONE' else 'acknowledged' }}"
+          person: "{{ parts[1] if parts | count == 3 else '' }}"
+          item_key: "{{ parts[2] if parts | count == 3 else parts[1] }}"
+
+  - id: nc_people_lists_refresh
+    alias: "Notification Center · Refresh people dropdowns"
+    description: Refills the person / phone dropdowns at startup, hourly and after a helper reload.
+    mode: restart
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: 7
+      - trigger: event
+        event_type: call_service
+        event_data:
+          domain: input_select
+          service: reload
+    actions:
+      - delay: "00:00:02"
+      - action: script.nc_refresh_people_lists
+
+  - id: nc_people_selection_changed
+    alias: "Notification Center · People dropdown changed"
+    description: >-
+      Saves a dropdown choice made on the dashboard. Picking a person also
+      fills in their phone when they have the Companion app.
+    mode: queued
+    max: 20
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_select.nc_person_1_select
+          - input_select.nc_person_2_select
+          - input_select.nc_person_3_select
+          - input_select.nc_person_4_select
+          - input_select.nc_person_5_select
+          - input_select.nc_person_1_notify_select
+          - input_select.nc_person_2_notify_select
+          - input_select.nc_person_3_notify_select
+          - input_select.nc_person_4_notify_select
+          - input_select.nc_person_5_notify_select
+    conditions:
+      # Only real user choices; changes made by the refresh script are ignored
+      - condition: template
+        value_template: >-
+          {{ trigger.to_state is not none
+             and trigger.to_state.context.user_id is not none
+             and trigger.to_state.state not in ['unknown', 'unavailable'] }}
+    actions:
+      - variables:
+          n: "{{ (trigger.entity_id | regex_findall('nc_person_(\\d)_') | first) }}"
+          is_phone: "{{ '_notify_select' in trigger.entity_id }}"
+          val: "{{ '' if trigger.to_state.state == '— none —' else trigger.to_state.state }}"
+      - if:
+          - condition: template
+            value_template: "{{ is_phone }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "input_text.nc_person_{{ n }}_notify"
+            data:
+              value: "{{ val }}"
+        else:
+          - action: input_text.set_value
+            target:
+              entity_id: "input_text.nc_person_{{ n }}_name"
+            data:
+              value: "{{ val }}"
+          # Auto-fill the phone from the person's Companion-app device tracker
+          - variables:
+              auto_svc: >-
+                {%- set p = states.person | selectattr('name', 'eq', val)
+                             | map(attribute='entity_id') | list -%}
+                {%- set ns = namespace(svc='') -%}
+                {%- if p -%}
+                  {%- set app = integration_entities('mobile_app') -%}
+                  {%- for t in state_attr(p[0], 'device_trackers') or []
+                        if t in app and not ns.svc -%}
+                    {%- set d = device_attr(t, 'name') -%}
+                    {%- if d -%}{%- set ns.svc = 'mobile_app_' ~ (d | slugify) -%}{%- endif -%}
+                  {%- endfor -%}
+                {%- endif -%}
+                {{ ns.svc }}
+          - if:
+              - condition: template
+                value_template: "{{ auto_svc | length > 0 }}"
+            then:
+              - action: input_text.set_value
+                target:
+                  entity_id: "input_text.nc_person_{{ n }}_notify"
+                data:
+                  value: "{{ auto_svc }}"
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {{ auto_svc in state_attr('input_select.nc_person_' ~ n ~ '_notify_select', 'options') }}
+                then:
+                  - action: input_select.select_option
+                    target:
+                      entity_id: "input_select.nc_person_{{ n }}_notify_select"
+                    data:
+                      option: "{{ auto_svc }}"
+
+  - id: nc_settings_selection_changed
+    alias: "Notification Center · Settings dropdown changed"
+    description: Saves the to-do list and "open on tap" chosen on the Settings tab.
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_select.nc_todo_select
+          - input_select.nc_open_url_select
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.to_state is not none
+             and trigger.to_state.context.user_id is not none
+             and trigger.to_state.state not in ['unknown', 'unavailable'] }}
+    actions:
+      - variables:
+          val: >-
+            {%- set v = trigger.to_state.state -%}
+            {{ v.split(' · ')[-1] if ' · ' in v else '' }}
+      - action: input_text.set_value
+        target:
+          entity_id: >-
+            {{ 'input_text.nc_todo_entity' if trigger.entity_id == 'input_select.nc_todo_select'
+               else 'input_text.nc_open_url' }}
+        data:
+          value: "{{ val }}"
+      # the to-do list choice also changes the "To-do list" link option
+      - action: script.nc_refresh_people_lists

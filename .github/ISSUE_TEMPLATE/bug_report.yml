@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! Please check the **Setup check** on the Settings tab first.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.10.4"
+    validations:
+      required: true
+  - type: input
+    id: nc_version
+    attributes:
+      label: Notification Center version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: dashboard
+    attributes:
+      label: Dashboard variant
+      options:
+        - notification_center_core.yaml (built-in cards)
+        - notification_center.yaml (fold-entity-row)
+        - Not using the dashboard
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: call
+    attributes:
+      label: The script call (YAML)
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines (Settings → System → Logs)
+      render: text
