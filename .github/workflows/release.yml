@@ -3,12 +3,26 @@ name: Release
 # Creates a tag + GitHub release (with a ready-to-install zip) whenever the
 # version in VERSION changes on main. To release: bump VERSION, add a
 # "## x.y.z" section to CHANGELOG.md, push.
+#
+# Manual run (Actions → Release → Run workflow):
+#   replace     – rebuild the release of the current VERSION from the latest
+#                 commit on main (same version number)
+#   delete_tags – space-separated tags to remove, together with their release
 
 on:
   push:
     branches: [main]
     paths: [VERSION]
   workflow_dispatch:
+    inputs:
+      replace:
+        description: "Rebuild the release of the current VERSION from the latest main"
+        type: boolean
+        default: false
+      delete_tags:
+        description: "Tags to delete (space-separated, e.g. v0.9.0)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -20,6 +34,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Delete old tags and releases
+        if: github.event_name == 'workflow_dispatch' && inputs.delete_tags != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAGS: ${{ inputs.delete_tags }}
+        run: |
+          for t in $TAGS; do
+            gh release delete "$t" --cleanup-tag --yes 2>/dev/null \
+              || git push origin ":refs/tags/$t" \
+              || echo "Tag $t not found"
+          done
+
+      - name: Remove the existing release of this version (replace)
+        if: github.event_name == 'workflow_dispatch' && inputs.replace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(tr -d ' \n' < VERSION)"
+          gh release delete "v$VERSION" --cleanup-tag --yes 2>/dev/null || true
+          git tag -d "v$VERSION" 2>/dev/null || true
 
       - name: Read version
         id: v
