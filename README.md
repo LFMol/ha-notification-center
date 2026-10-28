@@ -5,7 +5,7 @@
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.9%2B-41BDF5?logo=homeassistant&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A small **inbox for your smart home**. Automations van send alerts to one place, a Local To-do list. Each alert gets one of five priorities and a category icon. Push notifications go to exactly the people you name in each call, and they come with **Acknowledge** / **Done** buttons.
+A small **inbox for your smart home**. Automations can send alerts to one place, a Local To-do list. Each alert gets one of five priorities and a category icon. Push notifications go to exactly the people you name in each call, and they come with **Acknowledge** / **Done** buttons.
 
 ```
 🔴 P1 🚨 Alarm · 👀 Alex       Alarm triggered
