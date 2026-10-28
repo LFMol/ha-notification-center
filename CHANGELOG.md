@@ -9,7 +9,9 @@ First public release.
 - **`person_notify`** decides who gets a push, e.g. `"1,3,5"`, `all` or `none`.
 - **Up to five people**. Each slot is a Home Assistant user plus a phone, chosen from dropdowns on the People tab. Picking a user fills in their phone automatically.
 - **Acknowledge / Done** buttons on every push. The inbox shows who handled an item and when. Done completes it and clears every phone.
+- **Clean inbox items**: the name shows priority, icon and title; the message and optional `task_description` go in the description.
 - **Dedup and cooldown**: an open item with the same `dedup_key` is updated instead of duplicated, and repeats within the cooldown are ignored.
+- **Readable timestamps** in the item marker, e.g. `[ts:20261028 083924]` (local time).
 - **`script.nc_set_status`** for NFC tags, voice or other automations.
 - **Dashboard** with three tabs:
   - Inbox: status header and a "Send notification" form with named recipient switches.
