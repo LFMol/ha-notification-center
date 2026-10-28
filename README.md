@@ -13,8 +13,18 @@ A small **inbox for your smart home**. Every automation sends its alerts to one 
 🟡 P3 🏠 Sunscreen — Deployed automatically at 14:02
 ```
 
-<img width="431" height="437" alt="image" src="https://github.com/user-attachments/assets/15d832ff-c4c8-45d8-83ba-8d0b8416c81f" />
-
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <img width="431" height="437" alt="Screenshot of the Notification Center page" src="https://github.com/user-attachments/assets/15d832ff-c4c8-45d8-83ba-8d0b8416c81f" />
+      </td>
+    </tr>
+    <tr>
+      <td align="center"><sub><b>Screenshot 1:</b> The Notification Center page</sub></td>
+    </tr>
+  </table>
+</div>
 
 ## Features
 
