@@ -375,13 +375,15 @@ script:
           cat_icon: >-
             {{ {'parcel': '📦', 'post': '📬', 'home': '🏠', 'network': '🌐',
                 'security': '🚨', 'energy': '⚡', 'system': '🛠️'}.get(cat | lower, '🏷️') }}
+          # Name = priority, icon and title. Without a title the message is
+          # used as the name instead (and not repeated in the description).
           new_summary: >-
-            {%- set head = [prio_emoji ~ ' P' ~ prio, cat_icon, ttl] | select | join(' ') -%}
-            {{ head ~ (' — ' ~ msg if msg else '') }}
+            {{ [prio_emoji ~ ' P' ~ prio, cat_icon, ttl or msg] | select | join(' ') }}
           # Machine-readable tail: dedup key, timestamp, who was pushed (for
           # Acknowledge / Done updates). Do not remove from items.
           new_description: >-
-            {{ [task_desc, '[dedup:' ~ item_key ~ '] [ts:' ~ now_stamp ~ '] [to:' ~ pushed_nums ~ ']']
+            {{ [msg if ttl else '', task_desc,
+                '[dedup:' ~ item_key ~ '] [ts:' ~ now_stamp ~ '] [to:' ~ pushed_nums ~ ']']
                | select | join('\n\n') }}
           due_fields: >-
             {%- if due_dt -%}{{ {'due_datetime': due_dt} }}

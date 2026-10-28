@@ -8,9 +8,9 @@
 A small **inbox for your smart home**. Every automation sends its alerts to one place, a Local To-do list. Each alert gets one of five priorities and a category icon. Push notifications go to exactly the people you name in each call, and they come with **Acknowledge** / **Done** buttons.
 
 ```
-🔴 P1 🚨 Alarm — Alarm triggered · 👀 Alex
-🟠 P2 📬 Postbox — The postbox was opened
-🟡 P3 🏠 Sunscreen — Deployed automatically at 14:02
+🔴 P1 🚨 Alarm · 👀 Alex       Alarm triggered
+🟠 P2 📬 Postbox              The postbox was opened
+🟡 P3 🏠 Sunscreen            Deployed automatically at 14:02
 ```
 
 <div align="center">
@@ -120,7 +120,7 @@ The script returns a result you can use:
 ```yaml
 status: added | updated | cooldown
 item_key: postbox
-summary: "🟠 P2 📬 Postbox — The postbox was opened."
+summary: "🟠 P2 📬 Postbox"
 pushed_to: [mobile_app_pixel_8]
 ```
 
@@ -157,7 +157,7 @@ data:
 
 ## How it works
 
-- Each inbox item's description ends with `[dedup:<key>] [ts:<YYYYMMDD HHMMSS>] [to:<slots>]`. The script uses this to find, update and rate-limit items, and to update the right phones. Don't remove it.
+- An inbox item's **name** is the priority, icon and title. The **description** holds the message and the optional `task_description`, and ends with `[dedup:<key>] [ts:<YYYYMMDD HHMMSS>] [to:<slots>]`. The script uses this to find, update and rate-limit items, and to update the right phones. Don't remove it.
 - 🔴 🟠 🟡 🟢 🟣 are consecutive Unicode characters, so alphabetical order is also priority order.
 - Android gets one notification channel per priority (`Notification Center P1 Critical` … `P5 Info`), so each can have its own sound or Do Not Disturb behaviour.
 
